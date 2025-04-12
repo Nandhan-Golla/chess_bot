@@ -3,17 +3,17 @@ import depthai as dai
 import numpy as np
 from time import sleep
 
-# Initialize Oak-D Lite with focus sweep
+# Initialize Oak-D Lite with best focus
 def init_oakd(focus_value):
     pipeline = dai.Pipeline()
     cam_rgb = pipeline.create(dai.node.ColorCamera)
     xout_rgb = pipeline.create(dai.node.XLinkOut)
     xout_rgb.setStreamName("rgb")
-    cam_rgb.setPreviewSize(1024, 1024)  # Larger frame for 28.5 cm board
+    cam_rgb.setPreviewSize(1024, 1024)
     cam_rgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_4_K)
     cam_rgb.setInterleaved(False)
     cam_rgb.setFps(30)
-    cam_rgb.initialControl.setManualFocus(focus_value)  # Set focus
+    cam_rgb.initialControl.setManualFocus(focus_value)
     cam_rgb.preview.link(xout_rgb.input)
     return pipeline
 
@@ -28,23 +28,23 @@ def detect_chessboard(frame, debug_idx):
     
     # Noise reduction and edge enhancement
     blurred = cv2.GaussianBlur(gray, (7, 7), 1.5)
-    edges = cv2.Canny(blurred, 30, 120, apertureSize=3)
-    edges = cv2.dilate(edges, None, iterations=1)
+    edges = cv2.Canny(blurred, 20, 100, apertureSize=3)  # Adjusted thresholds
+    edges = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=2)  # Stronger dilation
     cv2.imwrite(f"debug_edges_{debug_idx}.jpg", edges)
     
-    # Thresholding (corrected typo)
+    # Improved thresholding
     processed = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                     cv2.THRESH_BINARY, 15, 3)
+                                     cv2.THRESH_BINARY, 17, 5)  # Larger block, offset
     cv2.imwrite(f"debug_adaptive_{debug_idx}.jpg", processed)
     
     # Detect corners
-    for scale in [0.8, 0.9, 1.0, 1.1, 1.2]:
+    for scale in [0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3]:  # Wider range
         scaled = cv2.resize(processed, None, fx=scale, fy=scale) if scale != 1.0 else processed
         ret, corners = cv2.findChessboardCorners(scaled, (7, 7),
                                                 flags=cv2.CALIB_CB_ADAPTIVE_THRESH +
                                                       cv2.CALIB_CB_NORMALIZE_IMAGE +
                                                       cv2.CALIB_CB_FAST_CHECK)
-        if ret and len(corners) >= 15:
+        if ret and len(corners) >= 10:  # Lower threshold
             if scale != 1.0:
                 corners /= scale
             corners = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1),
@@ -82,8 +82,19 @@ def detect_chessboard(frame, debug_idx):
             print(f"Chessboard detected at scale {scale}!")
             return squares, corners
     
-    print("Chessboard not detected!")
-    return None, None
+    # Manual fallback grid
+    h, w = frame.shape[:2]
+    square_size = w // 8  # Assume board fills frame
+    squares = {}
+    for i in range(8):
+        for j in range(8):
+            file = chr(ord('a') + j)
+            rank = str(8 - i)
+            x = int(j * square_size + square_size // 2)
+            y = int(i * square_size + square_size // 2)
+            squares[f"{file}{rank}"] = (x, y)
+    print("Chessboard not detected! Using manual grid fallback.")
+    return squares, None
 
 # Detect pieces (basic color-based)
 def detect_pieces(frame, squares):
@@ -96,9 +107,8 @@ def detect_pieces(frame, squares):
         if region.size == 0:
             continue
         hsv = cv2.cvtColor(region, cv2.COLOR_BGR2HSV)
-        # Simple threshold for piece (tune for your pieces)
         mean_hsv = np.mean(hsv, axis=(0, 1))
-        if mean_hsv[2] < 50 or mean_hsv[2] > 200:  # Value (brightness) threshold
+        if mean_hsv[2] < 50 or mean_hsv[2] > 200:  # Tune for your pieces
             board_state[square] = 'piece'
         else:
             board_state[square] = 'empty'
@@ -115,7 +125,7 @@ def main():
         pipeline = init_oakd(focus)
         with dai.Device(pipeline) as device:
             q_rgb = device.getOutputQueue(name="rgb", maxSize=4, blocking=False)
-            sleep(0.5)  # Stabilize
+            sleep(0.5)
             in_rgb = q_rgb.get()
             frame = in_rgb.getCvFrame()
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -124,7 +134,7 @@ def main():
             if sharpness > best_sharpness:
                 best_sharpness = sharpness
                 best_focus = focus
-            if sharpness > 100:  # Early stop if good
+            if sharpness > 100:
                 break
             sleep(0.1)
     
