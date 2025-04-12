@@ -26,25 +26,25 @@ def detect_chessboard(frame, debug_idx):
     sharpness = cv2.Laplacian(gray, cv2.CV_64F).var()
     print(f"Frame sharpness: {sharpness:.2f} (target >100)")
     
-    # Noise reduction and edge enhancement
+    # Enhanced edge detection
     blurred = cv2.GaussianBlur(gray, (7, 7), 1.5)
-    edges = cv2.Canny(blurred, 20, 100, apertureSize=3)  # Adjusted thresholds
-    edges = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=2)  # Stronger dilation
+    edges = cv2.Canny(blurred, 15, 80, apertureSize=3)  # Tighter thresholds
+    edges = cv2.dilate(edges, np.ones((3, 3), np.uint8), iterations=2)
     cv2.imwrite(f"debug_edges_{debug_idx}.jpg", edges)
     
     # Improved thresholding
     processed = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                     cv2.THRESH_BINARY, 17, 5)  # Larger block, offset
+                                     cv2.THRESH_BINARY, 19, 7)  # Larger block, offset
     cv2.imwrite(f"debug_adaptive_{debug_idx}.jpg", processed)
     
-    # Detect corners
-    for scale in [0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3]:  # Wider range
+    # Auto-detect corners
+    for scale in [0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3]:
         scaled = cv2.resize(processed, None, fx=scale, fy=scale) if scale != 1.0 else processed
         ret, corners = cv2.findChessboardCorners(scaled, (7, 7),
                                                 flags=cv2.CALIB_CB_ADAPTIVE_THRESH +
                                                       cv2.CALIB_CB_NORMALIZE_IMAGE +
                                                       cv2.CALIB_CB_FAST_CHECK)
-        if ret and len(corners) >= 10:  # Lower threshold
+        if ret and len(corners) >= 10:
             if scale != 1.0:
                 corners /= scale
             corners = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1),
@@ -82,26 +82,33 @@ def detect_chessboard(frame, debug_idx):
             print(f"Chessboard detected at scale {scale}!")
             return squares, corners
     
-    # Manual fallback grid
-    h, w = frame.shape[:2]
-    square_size = w // 8  # Assume board fills frame
-    squares = {}
-    for i in range(8):
-        for j in range(8):
-            file = chr(ord('a') + j)
-            rank = str(8 - i)
-            x = int(j * square_size + square_size // 2)
-            y = int(i * square_size + square_size // 2)
-            squares[f"{file}{rank}"] = (x, y)
-    print("Chessboard not detected! Using manual grid fallback.")
-    return squares, None
+    # Edge-based fallback if auto-detection fails
+    contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if contours:
+        largest_contour = max(contours, key=cv2.contourArea)
+        x, y, w, h = cv2.boundingRect(largest_contour)
+        if w > 300 and h > 300:  # Ensure it’s the board
+            square_size = min(w, h) // 8
+            squares = {}
+            for i in range(8):
+                for j in range(8):
+                    file = chr(ord('a') + j)
+                    rank = str(8 - i)
+                    x_pos = x + j * square_size + square_size // 2
+                    y_pos = y + i * square_size + square_size // 2
+                    squares[f"{file}{rank}"] = (int(x_pos), int(y_pos))
+            print("Chessboard not auto-detected! Using edge-based fallback.")
+            return squares, None
+    
+    print("Chessboard not detected!")
+    return None, None
 
 # Detect pieces (basic color-based)
 def detect_pieces(frame, squares):
     if squares is None:
         return None
     board_state = {}
-    region_size = 30  # ~1/4 of 128 px square
+    region_size = 30
     for square, (x, y) in squares.items():
         region = frame[max(0, y-region_size):y+region_size, max(0, x-region_size):x+region_size]
         if region.size == 0:
