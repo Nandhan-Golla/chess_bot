@@ -9,7 +9,7 @@ def init_oakd(focus_value):
     cam_rgb = pipeline.create(dai.node.ColorCamera)
     xout_rgb = pipeline.create(dai.node.XLinkOut)
     xout_rgb.setStreamName("rgb")
-    cam_rgb.setPreviewSize(1024, 1024)
+    cam_rgb.setPreviewSize(1024, 1024)  # Larger frame for 28.5 cm board
     cam_rgb.setResolution(dai.ColorCameraProperties.SensorResolution.THE_4_K)
     cam_rgb.setInterleaved(False)
     cam_rgb.setFps(30)
@@ -32,8 +32,8 @@ def detect_chessboard(frame, debug_idx):
     edges = cv2.dilate(edges, None, iterations=1)
     cv2.imwrite(f"debug_edges_{debug_idx}.jpg", edges)
     
-    # Thresholding
-    processed = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSIAN_C,
+    # Thresholding (corrected typo)
+    processed = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                                      cv2.THRESH_BINARY, 15, 3)
     cv2.imwrite(f"debug_adaptive_{debug_idx}.jpg", processed)
     
@@ -96,9 +96,8 @@ def detect_pieces(frame, squares):
         if region.size == 0:
             continue
         hsv = cv2.cvtColor(region, cv2.COLOR_BGR2HSV)
-        # Simple threshold for piece (dark or light pieces, tune these)
+        # Simple threshold for piece (tune for your pieces)
         mean_hsv = np.mean(hsv, axis=(0, 1))
-        # Example: dark pieces (<20 hue) or light pieces (>200 value)
         if mean_hsv[2] < 50 or mean_hsv[2] > 200:  # Value (brightness) threshold
             board_state[square] = 'piece'
         else:
